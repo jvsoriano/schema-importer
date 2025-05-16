@@ -1,16 +1,27 @@
+from enum import StrEnum
 from typing import Literal, Self
 
 from fastapi import HTTPException
-from pydantic import model_validator
+from pydantic import BaseModel, model_validator
 from sqlalchemy import Connection
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Field, SQLModel, create_engine
 
 
+class SourceConnectionError(StrEnum):
+    NOT_FOUND = "Source connection not found."
+
+    TABLE_REQUIRED = "Table name is required."
+    SCHEMA_REQUIRED = "Schema name is required."
+
+    CONNECTION_FAILED = "Connectivity test failed."
+    UNSUPPORTED_VERSION = "Database version not supported."
+
+
 class SourceConnectionBase(SQLModel):
     """Base data model of source connection."""
 
-    schema_name: str | None  # for postgresql only
+    schema_name: str | None = None  # for postgresql only
     table_name: str
 
     # connection requirements
@@ -19,6 +30,16 @@ class SourceConnectionBase(SQLModel):
     host: str
     port: int
     db: str
+
+
+class SourceConnection(SourceConnectionBase, table=True):
+    """
+    Table model of source connection.
+    Inherits source connection base.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    type: str  # mysql or postgresql
 
 
 class SourceConnectionCreate(SourceConnectionBase):
@@ -33,51 +54,7 @@ class SourceConnectionCreate(SourceConnectionBase):
     def validate_create(self) -> Self:
         validator = SourceConnectionValidator(self)
         validator.validate_source_connection()
-        # # validate mysql required fields
-        # if self.type == "mysql" and not self.table_name:
-        #     raise HTTPException(status_code=422, detail="Table name is required")
-
-        # # validate postgresql required fields
-        # if self.type == "postgresql" and (not self.schema_name or not self.table_name):
-        #     raise HTTPException(
-        #         status_code=422, detail="Schema and table name are required"
-        #     )
-
-        # validate database connection
-        # database = get_database(self)
-        # if not database:
-        #     raise HTTPException(status_code=422, detail="Failed to connect.")
-
-        # # validate database version
-        # database_version = get_database_version(database)
-        # version5_5 = database_version.startswith("5.5")
-        # version8_x = int(database_version[0]) >= 8
-        # version10_x = int(database_version[0]) >= 10
-        # if self.type == "mysql" and not (version5_5 or version8_x):
-        #     raise HTTPException(
-        #         status_code=422, detail="Database version not supported."
-        #     )
-        # if self.type == "postgresql" and not version10_x:
-        #     raise HTTPException(
-        #         status_code=422, detail="Database version not supported."
-        #     )
         return self
-
-
-class SourceConnection(SourceConnectionBase, table=True):
-    """Table model of source connection."""
-
-    id: int | None = Field(default=None, primary_key=True)
-    type: str  # mysql or postgresql
-
-
-# Create source connection test result schema
-class SourceConnectionTestResult(SQLModel):
-    """Data model for source connection test result"""
-
-    connectivity_test: bool = False
-    supported_version_test: bool = False
-    success: bool = False  # overall test result
 
 
 class SourceConnectionUpdate(SQLModel):
@@ -86,18 +63,20 @@ class SourceConnectionUpdate(SQLModel):
     Does not allow updating of source connection type.
     """
 
-    schema_name: str | None  # for postgresql only
-    table_name: str | None
+    schema_name: str | None = None  # for postgresql only
+    table_name: str | None = None
 
     # connection requirements
-    user: str | None
-    password: str | None
-    host: str | None
-    port: int | None
-    db: str | None
+    user: str | None = None
+    password: str | None = None
+    host: str | None = None
+    port: int | None = None
+    db: str | None = None
 
 
 class SourceConnectionValidator:
+    """Validator class for source connection."""
+
     def __init__(self, conn: SourceConnection | SourceConnectionCreate) -> None:
         self._conn = conn
 
@@ -108,24 +87,37 @@ class SourceConnectionValidator:
         PostgreSQL requires schema name and table name.
         """
 
-        # validate mysql required fields
-        if self._conn.type == "mysql" and not self._conn.table_name:
-            raise HTTPException(status_code=422, detail="Table name is required")
+        # Already handled by SQLModel
+        # if self._conn.type == "mysql" and not self._conn.table_name:
+        #     error = SourceConnectionError.TABLE_REQUIRED
+        #     raise HTTPException(status_code=422, detail=error)
 
-        # validate postgresql required fields
-        if self._conn.type == "postgresql" and (
-            not self._conn.schema_name or not self._conn.table_name
-        ):
-            raise HTTPException(
-                status_code=422, detail="Schema and table name are required"
-            )
+        if self._conn.type == "postgresql" and not self._conn.table_name:
+            error = SourceConnectionError.TABLE_REQUIRED
+            raise HTTPException(status_code=422, detail=error)
+
+        if self._conn.type == "postgresql" and not self._conn.schema_name:
+            error = SourceConnectionError.SCHEMA_REQUIRED
+            raise HTTPException(status_code=422, detail=error)
+
+
+class SourceConnectionTestResult(BaseModel):
+    """Test result schema for source connection tester."""
+
+    connectivity_test: bool
+    supported_version_test: bool
+    success: bool  # overall test result
 
 
 class SourceConnectionTester:
+    """Tester class for source connection."""
+
     def __init__(self, conn: SourceConnection) -> None:
         self._conn = conn
 
     def _get_database(self) -> Connection | None:
+        """Returns database connection based on type."""
+
         dialects = {"mysql": "mysql+pymysql", "postgresql": "postgresql"}
 
         db_type = self._conn.type
@@ -147,39 +139,54 @@ class SourceConnectionTester:
 
         return session
 
-    def _get_database_version(self, database: Connection):
+    def _get_database_version(self, database: Connection) -> dict:
+        """Returns database version."""
+
         version_tuple = database.dialect.server_version_info
-        return ".".join(str(version) for version in version_tuple or (0,))
+        version_string = ".".join(str(version) for version in version_tuple or (0,))
+        return {
+            "version_tuple": version_tuple,
+            "version_string": version_string,
+        }
+
+    def get_database(self):
+        return self._get_database()
 
     def test_source_connection(self) -> SourceConnectionTestResult:
-        test_result = SourceConnectionTestResult()
+        """
+        Executes series of tests for source connection.
+        1. Tests if can connect to database.
+        2. Tests if database version is supported.
 
-        # test database connection
+        MySQL connection only supports version 5.5, 8 and above.
+        PostgreSQL connection only suports version 10 and above.
+        """
+
+        test_result = SourceConnectionTestResult(
+            connectivity_test=False, supported_version_test=False, success=False
+        )
         database = self._get_database()
-        if not database:
-            return test_result
 
-        test_result.connectivity_test = True
+        if database:
+            test_result.connectivity_test = True
 
-        # test database version
-        database_version = self._get_database_version(database)
+            database_version = self._get_database_version(database)
+            database_version5_5 = database_version["version_string"].startswith("5.5")
+            database_version8_x = database_version["version_tuple"][0] >= 8
+            database_version10_x = database_version["version_tuple"][0] >= 10
 
-        # test mysql version
-        version5_5 = database_version.startswith("5.5")
-        version8_x = int(database_version[0]) >= 8
+            if self._conn.type == "mysql" and (
+                database_version5_5 or database_version8_x
+            ):
+                test_result.supported_version_test = True
+            elif self._conn.type == "postgresql" and database_version10_x:
+                test_result.supported_version_test = True
 
-        if self._conn.type == "mysql" and not (version5_5 or version8_x):
-            return test_result
-
-        test_result.supported_version_test = True
-
-        # test postgresql version
-        version10_x = int(database_version[0]) >= 10
-
-        if self._conn.type == "postgresql" and not version10_x:
-            return test_result
-
-        test_result.supported_version_test = True
-        test_result.success = True
+        test_result.success = all(
+            (
+                test_result.connectivity_test,
+                test_result.supported_version_test,
+            )
+        )
 
         return test_result

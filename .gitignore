@@ -175,6 +175,7 @@ cython_debug/
 
 # Sqlite db file
 app.db
+app.test.db
 
 # Instruction file
 instructions.md

@@ -1,4 +1,3 @@
-# Create database session dependency
 from typing import Annotated
 
 from fastapi import Depends

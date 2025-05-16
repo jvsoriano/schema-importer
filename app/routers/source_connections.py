@@ -1,11 +1,13 @@
-from typing import Annotated, Sequence
+from typing import Annotated, List
 
 from fastapi import APIRouter, HTTPException, Query
+from sqlmodel import create_engine, inspect
 
 from app.dependencies import SessionDep
 from app.models.source_connection import (
     SourceConnection,
     SourceConnectionCreate,
+    SourceConnectionError,
     SourceConnectionTester,
     SourceConnectionTestResult,
     SourceConnectionUpdate,
@@ -22,14 +24,17 @@ def create_source_connection(
     """Creates new source connection."""
 
     new_source_connection = SourceConnection(**source_connection.model_dump())
+
     tester = SourceConnectionTester(new_source_connection)
     test_result = tester.test_source_connection()
 
     if not test_result.connectivity_test:
-        raise HTTPException(status_code=422, detail="Connectivity test failed.")
+        error = SourceConnectionError.CONNECTION_FAILED
+        raise HTTPException(status_code=422, detail=error)
 
     if not test_result.supported_version_test:
-        raise HTTPException(status_code=422, detail="Database version not supported.")
+        error = SourceConnectionError.UNSUPPORTED_VERSION
+        raise HTTPException(status_code=422, detail=error)
 
     session.add(new_source_connection)
     session.commit()
@@ -41,11 +46,12 @@ def create_source_connection(
 # Test source connection
 @router.post("/test")
 def test_new_source_connection(
-    source_connection: SourceConnectionCreate, session: SessionDep
+    source_connection: SourceConnectionCreate,
 ) -> SourceConnectionTestResult:
     """Tests new source connection."""
 
     new_source_connection = SourceConnection(**source_connection.model_dump())
+
     tester = SourceConnectionTester(new_source_connection)
     test_result = tester.test_source_connection()
 
@@ -62,7 +68,8 @@ def test_existing_source_connection(
     source_connection = session.get(SourceConnection, id)
 
     if not source_connection:
-        raise HTTPException(status_code=404, detail="Source connection not found")
+        error = SourceConnectionError.NOT_FOUND
+        raise HTTPException(status_code=404, detail=error)
 
     tester = SourceConnectionTester(source_connection)
     test_result = tester.test_source_connection()
@@ -80,19 +87,26 @@ def update_source_connection(
     source_connection = session.get(SourceConnection, id)
 
     if not source_connection:
-        raise HTTPException(status_code=404, detail="Source connection not found")
+        error = SourceConnectionError.NOT_FOUND
+        raise HTTPException(status_code=404, detail=error)
 
-    source_connection.sqlmodel_update(source_connection_update.model_dump())
+    source_connection.sqlmodel_update(
+        source_connection_update.model_dump(exclude_unset=True)
+    )
+
     validator = SourceConnectionValidator(source_connection)
     validator.validate_source_connection()
+
     tester = SourceConnectionTester(source_connection)
     test_result = tester.test_source_connection()
 
     if not test_result.connectivity_test:
-        raise HTTPException(status_code=422, detail="Connectivity test failed.")
+        error = SourceConnectionError.CONNECTION_FAILED
+        raise HTTPException(status_code=422, detail=error)
 
     if not test_result.supported_version_test:
-        raise HTTPException(status_code=422, detail="Database version not supported.")
+        error = SourceConnectionError.UNSUPPORTED_VERSION
+        raise HTTPException(status_code=422, detail=error)
 
     session.add(source_connection)
     session.commit()
@@ -103,10 +117,26 @@ def update_source_connection(
 
 # Read source connection list of available tables
 @router.get("/{id}/tables")
-def read_source_connection_tables(id: int, session: SessionDep) -> Sequence[str]:
-    # source_connection_tables = session.exec(select(SourceConnection.table_name)).all()
-    # TODO: get available tables from database
-    return []
+def read_source_connection_tables(id: int, session: SessionDep) -> List[str]:
+    source_connection = session.get(SourceConnection, id)
+
+    if not source_connection:
+        error = SourceConnectionError.NOT_FOUND
+        raise HTTPException(status_code=404, detail=error)
+
+    if source_connection.type == "mysql":
+        engine = create_engine(
+            f"mysql+pymysql://{source_connection.user}:{source_connection.password}@{source_connection.host}:{source_connection.port}/{source_connection.db}"
+        )
+        inspector = inspect(engine)
+        return inspector.get_table_names()
+
+    else:
+        engine = create_engine(
+            f"postgresql://{source_connection.user}:{source_connection.password}@{source_connection.host}:{source_connection.port}/{source_connection.db}"
+        )
+        inspector = inspect(engine)
+        return inspector.get_table_names()
 
 
 # Read source connection table schema
