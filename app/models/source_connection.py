@@ -22,7 +22,7 @@ class SourceConnectionBase(SQLModel):
     """Base data model of source connection."""
 
     schema_name: str | None = None  # for postgresql only
-    table_name: str
+    table_name: str | None = None
 
     # connection requirements
     user: str
@@ -87,10 +87,9 @@ class SourceConnectionValidator:
         PostgreSQL requires schema name and table name.
         """
 
-        # Already handled by SQLModel
-        # if self._conn.type == "mysql" and not self._conn.table_name:
-        #     error = SourceConnectionError.TABLE_REQUIRED
-        #     raise HTTPException(status_code=422, detail=error)
+        if self._conn.type == "mysql" and not self._conn.table_name:
+            error = SourceConnectionError.TABLE_REQUIRED
+            raise HTTPException(status_code=422, detail=error)
 
         if self._conn.type == "postgresql" and not self._conn.table_name:
             error = SourceConnectionError.TABLE_REQUIRED
@@ -99,94 +98,3 @@ class SourceConnectionValidator:
         if self._conn.type == "postgresql" and not self._conn.schema_name:
             error = SourceConnectionError.SCHEMA_REQUIRED
             raise HTTPException(status_code=422, detail=error)
-
-
-class SourceConnectionTestResult(BaseModel):
-    """Test result schema for source connection tester."""
-
-    connectivity_test: bool
-    supported_version_test: bool
-    success: bool  # overall test result
-
-
-class SourceConnectionTester:
-    """Tester class for source connection."""
-
-    def __init__(self, conn: SourceConnection) -> None:
-        self._conn = conn
-
-    def _get_database(self) -> Connection | None:
-        """Returns database connection based on type."""
-
-        dialects = {"mysql": "mysql+pymysql", "postgresql": "postgresql"}
-
-        db_type = self._conn.type
-        db_user = self._conn.user
-        db_password = self._conn.password
-        db_host = self._conn.host
-        db_port = self._conn.port
-        db = self._conn.db
-
-        db_url = (
-            f"{dialects[db_type]}://{db_user}:{db_password}@{db_host}:{db_port}/{db}"
-        )
-
-        try:
-            engine = create_engine(db_url)
-            session = engine.connect()
-        except OperationalError:
-            session = None
-
-        return session
-
-    def _get_database_version(self, database: Connection) -> dict:
-        """Returns database version."""
-
-        version_tuple = database.dialect.server_version_info
-        version_string = ".".join(str(version) for version in version_tuple or (0,))
-        return {
-            "version_tuple": version_tuple,
-            "version_string": version_string,
-        }
-
-    def get_database(self):
-        return self._get_database()
-
-    def test_source_connection(self) -> SourceConnectionTestResult:
-        """
-        Executes series of tests for source connection.
-        1. Tests if can connect to database.
-        2. Tests if database version is supported.
-
-        MySQL connection only supports version 5.5, 8 and above.
-        PostgreSQL connection only suports version 10 and above.
-        """
-
-        test_result = SourceConnectionTestResult(
-            connectivity_test=False, supported_version_test=False, success=False
-        )
-        database = self._get_database()
-
-        if database:
-            test_result.connectivity_test = True
-
-            database_version = self._get_database_version(database)
-            database_version5_5 = database_version["version_string"].startswith("5.5")
-            database_version8_x = database_version["version_tuple"][0] >= 8
-            database_version10_x = database_version["version_tuple"][0] >= 10
-
-            if self._conn.type == "mysql" and (
-                database_version5_5 or database_version8_x
-            ):
-                test_result.supported_version_test = True
-            elif self._conn.type == "postgresql" and database_version10_x:
-                test_result.supported_version_test = True
-
-        test_result.success = all(
-            (
-                test_result.connectivity_test,
-                test_result.supported_version_test,
-            )
-        )
-
-        return test_result

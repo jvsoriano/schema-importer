@@ -1,3 +1,5 @@
+"""Main database. Not included in database factory"""
+
 from sqlmodel import SQLModel, create_engine
 
 sqlite_file_name = "app.db"
