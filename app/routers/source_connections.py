@@ -143,10 +143,28 @@ def read_source_connection_tables(id: int, session: SessionDep) -> List[str]:
 @router.get("/{id}/table_schema")
 def read_source_connection_table_schema(id: int, session: SessionDep):
     source_connection = session.get(SourceConnection, id)
+
     if not source_connection:
         raise HTTPException(status_code=404, detail="Source connection not found")
-    # TODO: get table schema from database
-    return
+
+    if source_connection.type == "mysql":
+        engine = create_engine(
+            f"mysql+pymysql://{source_connection.user}:{source_connection.password}@{source_connection.host}:{source_connection.port}/{source_connection.db}"
+        )
+        inspector = inspect(engine)
+        return inspector.get_columns(source_connection.table_name)
+
+    else:
+        engine = create_engine(
+            f"postgresql://{source_connection.user}:{source_connection.password}@{source_connection.host}:{source_connection.port}/{source_connection.db}"
+        )
+        inspector = inspect(engine)
+        columns = inspector.get_columns(
+            source_connection.table_name, source_connection.schema_name
+        )
+        return [
+            dict(zip(data.keys(), [str(x) for x in data.values()])) for data in columns
+        ]
 
 
 # Read source connection table rows
