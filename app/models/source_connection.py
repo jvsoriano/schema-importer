@@ -2,10 +2,8 @@ from enum import StrEnum
 from typing import Literal, Self
 
 from fastapi import HTTPException
-from pydantic import BaseModel, model_validator
-from sqlalchemy import Connection
-from sqlalchemy.exc import OperationalError
-from sqlmodel import Field, SQLModel, create_engine
+from pydantic import model_validator
+from sqlmodel import Field, SQLModel
 
 
 class SourceConnectionError(StrEnum):
@@ -16,6 +14,22 @@ class SourceConnectionError(StrEnum):
 
     CONNECTION_FAILED = "Connectivity test failed."
     UNSUPPORTED_VERSION = "Database version not supported."
+
+
+class SourceConnectionPublic(SQLModel):
+    """
+    Public data model of source connection.
+    Should not display password in public.
+    """
+
+    id: int
+    schema_name: str | None = None  # for postgresql only
+    table_name: str
+
+    user: str
+    host: str
+    port: int
+    db: str
 
 
 class SourceConnectionBase(SQLModel):

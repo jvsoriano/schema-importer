@@ -1,19 +1,23 @@
+from typing import Any
+
 from sqlalchemy.exc import ArgumentError, OperationalError
-from sqlmodel import Session, SQLModel, create_engine, inspect
+from sqlmodel import Session, create_engine, inspect
+
+from app.databases.base import BaseDatabase
 
 
-class MySQLdb:
-    def initialize(self):
-        SQLModel.metadata.create_all(self._engine)
-
+class MySQLdb(BaseDatabase):
     def connect(self, **kwargs):
-        user = kwargs.get("user", "")
-        password = kwargs.get("password", "")
-        host = kwargs.get("host", "")
-        port = kwargs.get("port", "")
-        db = kwargs.get("db", "")
+        self._table_name = kwargs.get("table_name", "")
+        self._schema_name = kwargs.get("schema_name", "")
 
-        db_url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{db}"
+        self._user = kwargs.get("user", "")
+        self._password = kwargs.get("password", "")
+        self._host = kwargs.get("host", "")
+        self._port = kwargs.get("port", "")
+        self._db = kwargs.get("db", "")
+
+        db_url = f"mysql+pymysql://{self._user}:{self._password}@{self._host}:{self._port}/{self._db}"
         self._engine = create_engine(db_url)
 
         try:
@@ -21,65 +25,41 @@ class MySQLdb:
         except OperationalError:
             self._session = None
 
-    def close(self):
-        if self._session:
-            self._session.close()
-
-    def tables(self):
+    def table_schema(self):
         if not self._session:
             raise Exception("Can't connect to database.")
 
-        inspector = inspect(self._engine)
-        try:
-            table_list = inspector.get_table_names()
-        except AttributeError:
-            table_list = []
-        return table_list
-
-    def table_schema(
-        self, table_name: str | None = None, schema_name: str | None = None
-    ):
-        if not self._session:
-            raise Exception("Can't connect to database.")
-
-        if not table_name:
+        if not self._table_name:
             return []
 
-        inspector = inspect(self._engine)
+        inspector: Any = inspect(self._engine)
         try:
-            return inspector.get_columns(table_name)
+            pk_constraint = inspector.get_pk_constraint(self._table_name)
+            columns = inspector.get_columns(self._table_name)
+            parsed_columns = []
+            for column in columns:
+                parsed_columns.append(
+                    {
+                        **column,
+                        "primary_key": column["name"]
+                        in pk_constraint["constrained_columns"],
+                    }
+                )
+            return parsed_columns
         except OperationalError:
             return []
 
-    def table_rows(
-        self,
-        table_name: str | None = None,
-        schema_name: str | None = None,
-        limit: int = 10,
-    ):
-        if not table_name:
+    def table_rows(self, limit: int = 10):
+        if not self._table_name:
             return []
 
         with Session(self._engine) as session:
-            statement = f"SELECT * FROM {table_name} LIMIT {limit}"
+            statement = f"SELECT * FROM {self._table_name} LIMIT {limit}"
             try:
                 rows = session.exec(statement)  # type: ignore
                 return rows
             except ArgumentError:
                 return []
-
-    def version(self):
-        if not self._session:
-            raise Exception("Can't connect to database.")
-
-        version_fallback = (
-            0,
-            0,
-        )
-        version_tuple = self._session.dialect.server_version_info or version_fallback
-        version_major_minor = version_tuple[0:2]
-        version_string = ".".join([str(version) for version in version_major_minor])
-        return float(version_string)
 
     def run_tests(self):
         version = self.version()

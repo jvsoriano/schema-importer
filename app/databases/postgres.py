@@ -1,99 +1,100 @@
+from typing import Any
+
 from sqlalchemy.exc import ArgumentError, NoSuchTableError, OperationalError
-from sqlmodel import Session, SQLModel, create_engine, inspect
+from sqlmodel import Session, create_engine, inspect, text
+
+from app.databases.base import BaseDatabase
 
 
-class PostgreSQLdb:
-    def initialize(self):
-        SQLModel.metadata.create_all(self._engine)
-
+class PostgreSQLdb(BaseDatabase):
     def connect(self, **kwargs):
-        user = kwargs.get("user", "")
-        password = kwargs.get("password", "")
-        host = kwargs.get("host", "")
-        port = kwargs.get("port", "")
-        db = kwargs.get("db", "")
+        self._table_name = kwargs.get("table_name", "")
+        self._schema_name = kwargs.get("schema_name", "")
 
-        db_url = f"postgresql://{user}:{password}@{host}:{port}/{db}"
-        self._engine = create_engine(db_url)
+        self._user = kwargs.get("user", "")
+        self._password = kwargs.get("password", "")
+        self._host = kwargs.get("host", "")
+        self._port = kwargs.get("port", "")
+        self._db = kwargs.get("db", "")
+
+        db_url = f"postgresql://{self._user}:{self._password}@{self._host}:{self._port}/{self._db}"
+        self._engine = create_engine(db_url)  # noqa: F821
 
         try:
             self._session = self._engine.connect()
         except OperationalError:
             self._session = None
 
-    def close(self):
-        if self._session:
-            self._session.close()
-
-    def tables(self):
+    def table_schema(self):
         if not self._session:
             raise Exception("Can't connect to database.")
 
-        inspector = inspect(self._engine)
-        try:
-            return inspector.get_table_names()
-        except AttributeError:
+        if not self._table_name:
             return []
 
-    def table_schema(
-        self, table_name: str | None = None, schema_name: str | None = None
-    ):
-        if not self._session:
-            raise Exception("Can't connect to database.")
-
-        if not table_name:
-            return []
-
-        inspector = inspect(self._engine)
+        inspector: Any = inspect(self._engine)
         try:
-            columns = inspector.get_columns(table_name, schema_name)
-            converted_columns = [
-                dict(zip(column.keys(), [str(val) for val in column.values()]))
-                for column in columns
-            ]
-            return converted_columns
+            pk_constraint = inspector.get_pk_constraint(
+                self._table_name, self._schema_name
+            )
+            columns = inspector.get_columns(self._table_name, self._schema_name)
+            parsed_columns = []
+            for column in columns:
+                converted_column = dict(
+                    zip(column.keys(), [str(val) for val in column.values()])
+                )
+                parsed_columns.append(
+                    {
+                        **converted_column,
+                        "primary_key": column["name"]
+                        in pk_constraint["constrained_columns"],
+                    }
+                )
+            return parsed_columns
         except NoSuchTableError:
             return []
 
-    def table_rows(
-        self,
-        table_name: str | None = None,
-        schema_name: str | None = None,
-        limit: int = 10,
-    ):
-        if not table_name:
+    def table_rows(self, limit: int = 10):
+        if not self._table_name:
             return []
 
         with Session(self._engine) as session:
-            statement = f"SELECT * FROM {schema_name}.{table_name} LIMIT {limit}"
+            statement = (
+                f"SELECT * FROM {self._schema_name}.{self._table_name} LIMIT {limit}"
+            )
             try:
                 rows = session.exec(statement)  # type: ignore
                 return rows
             except ArgumentError:
                 return []
 
-    def version(self):
-        if not self._session:
-            raise Exception("Can't connect to database.")
-
-        version_fallback = (
-            0,
-            0,
-        )
-        version_tuple = self._session.dialect.server_version_info or version_fallback
-        version_major_minor = version_tuple[0:2]
-        version_string = ".".join([str(version) for version in version_major_minor])
-        return float(version_string)
-
     def run_tests(self):
         version = self.version()
-        result = {"connection_test": False, "supported_version_test": False}
+        result = {
+            "connection_test": False,
+            "supported_version_test": False,
+            "has_schema_privilege": False,
+            "has_table_privilege": False,
+        }
 
         if self._session:
             result["connection_test"] = True
 
         if version >= 10:
             result["supported_version_test"] = True
+
+        with Session(self._engine) as session:
+            # check if user has schema privilege
+            if self._schema_name:
+                statement = f"SELECT pg_catalog.has_schema_privilege('{self._user}', '{self._schema_name}', 'CREATE');"
+                schema_privilege = session.exec(text(statement))  # type: ignore
+                result["has_schema_privilege"] = True in next(schema_privilege)
+
+            # check if user has table privilege
+            if self._table_name:
+                statement = f"SELECT privilege_type FROM information_schema.role_table_grants WHERE grantee='{self._user}' AND table_name='{self._table_name}' AND privilege_type='INSERT';"
+                table_privilege = session.exec(text(statement))  # type: ignore
+                result["has_table_privilege"] = "INSERT" in next(table_privilege)
 
         result["success"] = all(result.values())
 

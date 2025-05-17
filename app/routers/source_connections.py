@@ -2,12 +2,13 @@ from typing import Annotated, List
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.databases.base import DatabaseFactory
+from app.databases import DatabaseFactory
 from app.dependencies import SessionDep
 from app.models.source_connection import (
     SourceConnection,
     SourceConnectionCreate,
     SourceConnectionError,
+    SourceConnectionPublic,
     SourceConnectionUpdate,
     SourceConnectionValidator,
 )
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/source-connection", tags=["Source Connection"])
 @router.post("/")
 def create_source_connection(
     source_connection: SourceConnectionCreate, session: SessionDep
-) -> SourceConnection:
+) -> SourceConnectionPublic:
     """Creates new source connection."""
 
     new_source_connection = SourceConnection(**source_connection.model_dump())
@@ -43,7 +44,7 @@ def create_source_connection(
     session.commit()
     session.refresh(new_source_connection)
 
-    return new_source_connection
+    return SourceConnectionPublic(**new_source_connection.model_dump())
 
 
 # Test source connection
@@ -88,7 +89,7 @@ def test_existing_source_connection(id: int, session: SessionDep) -> dict[str, b
 @router.patch("/{id}")
 def update_source_connection(
     id: int, source_connection_update: SourceConnectionUpdate, session: SessionDep
-) -> SourceConnection:
+) -> SourceConnectionPublic:
     """Updates source connection."""
 
     source_connection = session.get(SourceConnection, id)
@@ -124,7 +125,7 @@ def update_source_connection(
     session.commit()
     session.refresh(source_connection)
 
-    return source_connection
+    return SourceConnectionPublic(**source_connection.model_dump())
 
 
 # Read source connection list of available tables
@@ -155,9 +156,7 @@ def read_source_connection_table_schema(id: int, session: SessionDep):
     database = database_factory.get_database(source_connection.type)
     database.connect(**source_connection.model_dump())
 
-    return database.table_schema(
-        source_connection.table_name, source_connection.schema_name
-    )
+    return database.table_schema()
 
 
 # Read source connection table rows
@@ -174,9 +173,7 @@ def read_source_connection_table_rows(
     database = database_factory.get_database(source_connection.type)
     database.connect(**source_connection.model_dump())
 
-    rows = database.table_rows(
-        source_connection.table_name, source_connection.schema_name, limit
-    )
+    rows = database.table_rows()
     return rows
 
 

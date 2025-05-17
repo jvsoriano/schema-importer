@@ -1,39 +1,41 @@
-from typing import Any, List, Protocol
+from typing import Any
 
-from app.databases.mysql import MySQLdb
-from app.databases.postgres import PostgreSQLdb
-
-
-class Database(Protocol):
-    def initialize(self): ...
-
-    def connect(self, **kwargs: dict[str, str | int]): ...
-
-    def close(self) -> None: ...
-
-    def tables(self) -> List[str]: ...
-
-    def table_schema(
-        self, table_name: str | None = None, schema_name: str | None = None
-    ) -> List[Any]: ...
-
-    def table_rows(
-        self,
-        table_name: str | None = None,
-        schema_name: str | None = None,
-        limit: int = 10,
-    ) -> List[Any]: ...
-
-    def version(self) -> float: ...
-
-    def run_tests(self) -> dict[str, bool]: ...
+from sqlalchemy import Connection, Engine
+from sqlmodel import SQLModel, inspect
 
 
-class DatabaseFactory:
-    def get_database(self, db_type: str) -> Database:
-        if db_type == "mysql":
-            return MySQLdb()
-        elif db_type == "postgresql":
-            return PostgreSQLdb()
-        else:
-            raise ValueError("Invalid database type.")
+class BaseDatabase:
+    def __init__(self) -> None:
+        self._engine: Engine | None = None
+        self._session: Connection | None = None
+
+    def initialize(self):
+        if self._engine:
+            SQLModel.metadata.create_all(self._engine)
+
+    def close(self):
+        if self._session:
+            self._session.close()
+
+    def tables(self):
+        if not self._session:
+            raise Exception("Can't connect to database.")
+
+        inspector: Any = inspect(self._engine)
+        try:
+            return inspector.get_table_names()
+        except AttributeError:
+            return []
+
+    def version(self):
+        if not self._session:
+            return 0.0
+
+        version_fallback = (
+            0,
+            0,
+        )
+        version_tuple = self._session.dialect.server_version_info or version_fallback
+        version_major_minor = version_tuple[0:2]
+        version_string = ".".join([str(version) for version in version_major_minor])
+        return float(version_string)
