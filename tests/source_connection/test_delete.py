@@ -38,7 +38,8 @@ def test_delete_existing():
 
 
 def test_delete_not_existing():
-    response = client.delete(url.format("not_existing_id"))
+    not_existing_id = 100
+    response = client.delete(url.format(not_existing_id))
     response_json = response.json()
     assert response.status_code == 404, response.text
     assert response_json.get("detail") == SourceConnectionError.NOT_FOUND

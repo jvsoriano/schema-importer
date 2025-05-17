@@ -185,7 +185,8 @@ def delete_source_connection(id: int, session: SessionDep) -> dict:
     source_connection = session.get(SourceConnection, id)
 
     if not source_connection:
-        raise HTTPException(status_code=404, detail="Source connection not found")
+        error = SourceConnectionError.NOT_FOUND
+        raise HTTPException(status_code=404, detail=error)
 
     session.delete(source_connection)
     session.commit()
