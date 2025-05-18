@@ -35,6 +35,8 @@ This API creates and tests source connections, retrieves a table schema, list of
     docker compose up -d --build
     ```
 
+    To stop docker services, execute `docker compose down`.
+
 4. Populate test data:
 
     ```sh

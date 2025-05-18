@@ -30,7 +30,9 @@ class PostgreSQLdb:
         return [
             {
                 **dict(zip(column.keys(), [str(val) for val in column.values()])),
-                "primary_key": column["name"] in pk_constraint["constrained_columns"],
+                "primary_key": str(
+                    column["name"] in pk_constraint["constrained_columns"]
+                ),
             }
             for column in columns
         ]

@@ -38,7 +38,7 @@ def create_user(user, password, session):
 
 
 def grant_schema_privilege(user, schema, session):
-    session.execute(text(f"GRANT ALL ON SCHEMA {schema} TO {user};"))
+    session.execute(text(f"GRANT ALL ON ALL TABLES IN SCHEMA {schema} TO {user};"))
     session.commit()
 
 
