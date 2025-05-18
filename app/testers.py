@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel
-from sqlalchemy.exc import InternalError, OperationalError, ProgrammingError
+from sqlalchemy.exc import OperationalError
 from sqlalchemy_utils import database_exists
 from sqlmodel import create_engine, inspect, text
 
@@ -130,15 +130,7 @@ class SourceConnectionTester:
             statement = f"SELECT pg_catalog.has_schema_privilege('{self.__user}', '{self.__schema}', 'CREATE');"
             schema_privilege = session.execute(text(statement))
             for result in schema_privilege:
-                print(">>>>>>>>>>>>>>>>>>>>>>>>>", engine.url, statement, result)
                 self.__result.user_create_schema_privilege = True in result
-        # try:
-        #     statement = f"SELECT pg_catalog.has_schema_privilege('{self.__user}', '{self.__schema}', 'CREATE');"
-        #     schema_privilege = session.execute(text(statement))
-        #     for result in schema_privilege:
-        #         self.__result.user_create_schema_privilege = True in result
-        # except ProgrammingError:
-        #     self.__result.user_create_schema_privilege = False
 
         if self.__raise_exceptions and not self.__result.user_create_schema_privilege:
             raise HTTPException(
@@ -150,26 +142,10 @@ class SourceConnectionTester:
         password = self.__credentials_mapping[self.__type]["password"]
         engine = create_engine(self.__url(user, password))
         with engine.connect() as session:
-            # statement = (
-            #     f"SELECT rolcreatedb FROM pg_authid where rolname = '{self.__user}';"
-            # )
-            # db_privilege = session.execute(text(statement))
-            # for result in db_privilege:
-            #     self.__result.user_create_database_privilege = True in result
             statement = f"SELECT pg_catalog.has_database_privilege('{self.__user}', '{self.__db}', 'CREATE');"
             db_privilege = session.execute(text(statement))
             for result in db_privilege:
-                print(">>>>>>>>>>>>>>>>>>>>>>>>>", engine.url, statement, result)
                 self.__result.user_create_database_privilege = True in result
-        # try:
-        #     statement = (
-        #         f"SELECT rolcreatedb FROM pg_authid where rolname = '{self.__user}';"
-        #     )
-        #     db_privilege = session.execute(text(statement))
-        #     for result in db_privilege:
-        #         self.__result.user_create_database_privilege = True in result
-        # except (InternalError, ProgrammingError):
-        #     self.__result.user_create_database_privilege = False
 
         if self.__raise_exceptions and not self.__result.user_create_database_privilege:
             raise HTTPException(
