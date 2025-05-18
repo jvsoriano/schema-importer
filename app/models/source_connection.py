@@ -1,35 +1,6 @@
-from enum import StrEnum
-from typing import Literal, Self
+from typing import Literal
 
-from fastapi import HTTPException
-from pydantic import model_validator
 from sqlmodel import Field, SQLModel
-
-
-class SourceConnectionError(StrEnum):
-    NOT_FOUND = "Source connection not found."
-
-    TABLE_REQUIRED = "Table name is required."
-    SCHEMA_REQUIRED = "Schema name is required."
-
-    CONNECTION_FAILED = "Connectivity test failed."
-    UNSUPPORTED_VERSION = "Database version not supported."
-
-
-class SourceConnectionPublic(SQLModel):
-    """
-    Public data model of source connection.
-    Should not display password in public.
-    """
-
-    id: int
-    schema_name: str | None = None  # for postgresql only
-    table_name: str
-
-    user: str
-    host: str
-    port: int
-    db: str
 
 
 class SourceConnectionBase(SQLModel):
@@ -46,16 +17,6 @@ class SourceConnectionBase(SQLModel):
     db: str
 
 
-class SourceConnection(SourceConnectionBase, table=True):
-    """
-    Table model of source connection.
-    Inherits source connection base.
-    """
-
-    id: int | None = Field(default=None, primary_key=True)
-    type: str  # mysql or postgresql
-
-
 class SourceConnectionCreate(SourceConnectionBase):
     """
     Data model for creating source connection.
@@ -64,11 +25,19 @@ class SourceConnectionCreate(SourceConnectionBase):
 
     type: Literal["mysql", "postgresql"]
 
-    @model_validator(mode="after")
-    def validate_create(self) -> Self:
-        validator = SourceConnectionValidator(self)
-        validator.validate_source_connection()
-        return self
+
+class SourceConnection(SourceConnectionBase, table=True):
+    """Table model of source connection."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    type: str  # mysql or postgresql
+
+    @property
+    def url(self):
+        if self.type == "mysql":
+            return f"mysql+pymysql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
+        else:
+            return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
 
 class SourceConnectionUpdate(SQLModel):
@@ -88,27 +57,18 @@ class SourceConnectionUpdate(SQLModel):
     db: str | None = None
 
 
-class SourceConnectionValidator:
-    """Validator class for source connection."""
+class SourceConnectionPublic(SQLModel):
+    """
+    Public data model of source connection.
+    Should not display password in public.
+    """
 
-    def __init__(self, conn: SourceConnection | SourceConnectionCreate) -> None:
-        self._conn = conn
+    id: int
+    type: str
+    schema_name: str | None = None  # for postgresql only
+    table_name: str
 
-    def validate_source_connection(self):
-        """
-        Validates source connection.
-        MySQL requires table name.
-        PostgreSQL requires schema name and table name.
-        """
-
-        if self._conn.type == "mysql" and not self._conn.table_name:
-            error = SourceConnectionError.TABLE_REQUIRED
-            raise HTTPException(status_code=422, detail=error)
-
-        if self._conn.type == "postgresql" and not self._conn.table_name:
-            error = SourceConnectionError.TABLE_REQUIRED
-            raise HTTPException(status_code=422, detail=error)
-
-        if self._conn.type == "postgresql" and not self._conn.schema_name:
-            error = SourceConnectionError.SCHEMA_REQUIRED
-            raise HTTPException(status_code=422, detail=error)
+    user: str
+    host: str
+    port: int
+    db: str

@@ -1,35 +1,23 @@
-from typing import Any, List, Protocol
+from typing import Any, Protocol, Sequence
 
 from app.databases.mysql import MySQLdb
 from app.databases.postgres import PostgreSQLdb
 
 
 class Database(Protocol):
-    def initialize(self): ...
+    def get_table_names(self) -> list[str]: ...
 
-    def connect(self, **kwargs: dict[str, str | int]): ...
+    def get_table_schema(self) -> list[dict[str, Any]]: ...
 
-    def close(self) -> None: ...
-
-    def tables(self) -> List[str]: ...
-
-    def table_schema(self) -> List[Any]: ...
-
-    def table_rows(
-        self,
-        limit: int = 10,
-    ) -> List[Any]: ...
-
-    def version(self) -> float: ...
-
-    def run_tests(self) -> dict[str, bool]: ...
+    def get_table_rows(self, limit: int = 10) -> Sequence[Any]: ...
 
 
 class DatabaseFactory:
-    def get_database(self, db_type: str) -> Database:
-        if db_type == "mysql":
-            return MySQLdb()
-        elif db_type == "postgresql":
-            return PostgreSQLdb()
+    def __init__(self, source_connection: dict[str, Any]) -> None:
+        self.__source_connection = source_connection
+
+    def get_database(self) -> Database:
+        if self.__source_connection["type"] == "mysql":
+            return MySQLdb(self.__source_connection)
         else:
-            raise ValueError("Invalid database type.")
+            return PostgreSQLdb(self.__source_connection)

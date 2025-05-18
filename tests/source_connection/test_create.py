@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from app.dependencies import get_session
 from app.main import app
-from app.models.source_connection import SourceConnectionError
+from app.validators import Error as ValidationError
 from tests.conftest import get_session_replacement
 from tests.factories.source_connection_factory import SourceConnectionFactory
 
@@ -12,9 +12,7 @@ app.dependency_overrides[get_session] = get_session_replacement
 
 factory = SourceConnectionFactory()
 mysql_conn = factory.get_source_connection("mysql")
-mysql_data = None
 postgresql_conn = factory.get_source_connection("postgresql")
-postgresql_data = None
 url = "/source-connection/"
 
 
@@ -51,7 +49,7 @@ def test_mysql_required_fields():
     )
     response_json = response.json()
     assert response.status_code == 422, response.text
-    assert response_json.get("detail") == SourceConnectionError.TABLE_REQUIRED
+    assert response_json.get("detail") == ValidationError.TABLE_REQUIRED_ERROR
 
 
 def test_postgresql_required_fields():
@@ -65,7 +63,7 @@ def test_postgresql_required_fields():
     )
     response_json = response.json()
     assert response.status_code == 422, response.text
-    assert response_json.get("detail") == SourceConnectionError.TABLE_REQUIRED
+    assert response_json.get("detail") == ValidationError.TABLE_REQUIRED_ERROR
 
     response = client.post(
         url,
@@ -77,7 +75,7 @@ def test_postgresql_required_fields():
     )
     response_json = response.json()
     assert response.status_code == 422, response.text
-    assert response_json.get("detail") == SourceConnectionError.SCHEMA_REQUIRED
+    assert response_json.get("detail") == ValidationError.SCHEMA_REQUIRED_ERROR
 
 
 def test_not_supported_type():

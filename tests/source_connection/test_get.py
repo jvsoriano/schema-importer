@@ -11,9 +11,6 @@ app.dependency_overrides[get_session] = get_session_replacement
 
 factory = SourceConnectionFactory()
 mysql_conn = factory.get_source_connection("mysql")
-response_json = {}
-postgresql_conn = factory.get_source_connection("postgresql")
-postgresql_data = None
 url = "/source-connection/{0}"
 
 

@@ -1,6 +1,8 @@
 import pytest
+from dotenv import load_dotenv
 from sqlmodel import Session, SQLModel, StaticPool, create_engine
 
+load_dotenv()
 sqlite_url = "sqlite:///:memory:"
 connect_args = {"check_same_thread": False}
 engine = create_engine(sqlite_url, connect_args=connect_args, poolclass=StaticPool)

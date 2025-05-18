@@ -1,4 +1,4 @@
-from typing import Annotated, List
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -7,11 +7,13 @@ from app.dependencies import SessionDep
 from app.models.source_connection import (
     SourceConnection,
     SourceConnectionCreate,
-    SourceConnectionError,
     SourceConnectionPublic,
     SourceConnectionUpdate,
-    SourceConnectionValidator,
 )
+from app.testers import SourceConnectionTester
+from app.validators import SourceConnectionValidator
+
+NOT_FOUND_ERROR = "Source connection not found."
 
 router = APIRouter(prefix="/source-connection", tags=["Source Connection"])
 
@@ -22,23 +24,16 @@ def create_source_connection(
 ) -> SourceConnectionPublic:
     """Creates new source connection."""
 
-    new_source_connection = SourceConnection(**source_connection.model_dump())
+    source_connection_dict = source_connection.model_dump()
+    source_connection_validator = SourceConnectionValidator(source_connection_dict)
+    source_connection_validator.validate()
 
-    database_factory = DatabaseFactory()
-    database = database_factory.get_database(new_source_connection.type)
-    database.connect(**new_source_connection.model_dump(exclude_unset=True))
+    source_connection_tester = SourceConnectionTester(
+        source_connection_dict, raise_exceptions=True
+    )
+    source_connection_tester.test()
 
-    test_result = database.run_tests()
-
-    if not test_result["connection_test"]:
-        error = SourceConnectionError.CONNECTION_FAILED
-        raise HTTPException(status_code=422, detail=error)
-
-    if not test_result["supported_version_test"]:
-        error = SourceConnectionError.UNSUPPORTED_VERSION
-        raise HTTPException(status_code=422, detail=error)
-
-    database.close()
+    new_source_connection = SourceConnection(**source_connection_dict)
 
     session.add(new_source_connection)
     session.commit()
@@ -47,25 +42,19 @@ def create_source_connection(
     return SourceConnectionPublic(**new_source_connection.model_dump())
 
 
-# Test source connection
 @router.post("/test")
 def test_new_source_connection(
     source_connection: SourceConnectionCreate,
 ) -> dict[str, bool]:
-    """Tests new source connection."""
+    """Tests source connection."""
 
-    new_source_connection = SourceConnection(**source_connection.model_dump())
+    source_connection_dict = source_connection.model_dump()
+    source_connection_tester = SourceConnectionTester(source_connection_dict)
+    source_connection_tester.test()
 
-    database_factory = DatabaseFactory()
-    database = database_factory.get_database(new_source_connection.type)
-    database.connect(**new_source_connection.model_dump(exclude_unset=True))
-
-    test_result = database.run_tests()
-
-    return test_result
+    return source_connection_tester.test_result()
 
 
-# Test existing source connection
 @router.post("/{id}/test")
 def test_existing_source_connection(id: int, session: SessionDep) -> dict[str, bool]:
     """Tests existing source connection."""
@@ -73,19 +62,15 @@ def test_existing_source_connection(id: int, session: SessionDep) -> dict[str, b
     source_connection = session.get(SourceConnection, id)
 
     if not source_connection:
-        error = SourceConnectionError.NOT_FOUND
-        raise HTTPException(status_code=404, detail=error)
+        raise HTTPException(status_code=404, detail=NOT_FOUND_ERROR)
 
-    database_factory = DatabaseFactory()
-    database = database_factory.get_database(source_connection.type)
-    database.connect(**source_connection.model_dump())
+    source_connection_dict = source_connection.model_dump()
+    source_connection_tester = SourceConnectionTester(source_connection_dict)
+    source_connection_tester.test()
 
-    test_result = database.run_tests()
-
-    return test_result
+    return source_connection_tester.test_result()
 
 
-# Update source connection
 @router.patch("/{id}")
 def update_source_connection(
     id: int, source_connection_update: SourceConnectionUpdate, session: SessionDep
@@ -95,31 +80,21 @@ def update_source_connection(
     source_connection = session.get(SourceConnection, id)
 
     if not source_connection:
-        error = SourceConnectionError.NOT_FOUND
-        raise HTTPException(status_code=404, detail=error)
+        raise HTTPException(status_code=404, detail=NOT_FOUND_ERROR)
 
-    source_connection_update_data = source_connection_update.model_dump(
+    source_connection_update_dict = source_connection_update.model_dump(
         exclude_unset=True
     )
+    source_connection.sqlmodel_update(source_connection_update_dict)
 
-    source_connection.sqlmodel_update(source_connection_update_data)
+    source_connection_dict = source_connection.model_dump()
+    source_connection_validator = SourceConnectionValidator(source_connection_dict)
+    source_connection_validator.validate()
 
-    validator = SourceConnectionValidator(source_connection)
-    validator.validate_source_connection()
-
-    database_factory = DatabaseFactory()
-    database = database_factory.get_database(source_connection.type)
-    database.connect(**source_connection.model_dump())
-
-    test_result = database.run_tests()
-
-    if not test_result["connection_test"]:
-        error = SourceConnectionError.CONNECTION_FAILED
-        raise HTTPException(status_code=422, detail=error)
-
-    if not test_result["supported_version_test"]:
-        error = SourceConnectionError.UNSUPPORTED_VERSION
-        raise HTTPException(status_code=422, detail=error)
+    source_connection_tester = SourceConnectionTester(
+        source_connection_dict, raise_exceptions=True
+    )
+    source_connection_tester.test()
 
     session.add(source_connection)
     session.commit()
@@ -128,38 +103,34 @@ def update_source_connection(
     return SourceConnectionPublic(**source_connection.model_dump())
 
 
-# Read source connection list of available tables
 @router.get("/{id}/tables")
-def read_source_connection_tables(id: int, session: SessionDep) -> List[str]:
+def read_source_connection_tables(id: int, session: SessionDep):
     source_connection = session.get(SourceConnection, id)
 
     if not source_connection:
-        error = SourceConnectionError.NOT_FOUND
-        raise HTTPException(status_code=404, detail=error)
+        raise HTTPException(status_code=404, detail=NOT_FOUND_ERROR)
 
-    database_factory = DatabaseFactory()
-    database = database_factory.get_database(source_connection.type)
-    database.connect(**source_connection.model_dump())
+    source_connection_dict = source_connection.model_dump()
+    database_factory = DatabaseFactory(source_connection_dict)
+    database = database_factory.get_database()
 
-    return database.tables()
+    return database.get_table_names()
 
 
-# Read source connection table schema
 @router.get("/{id}/table-schema")
 def read_source_connection_table_schema(id: int, session: SessionDep):
     source_connection = session.get(SourceConnection, id)
 
     if not source_connection:
-        raise HTTPException(status_code=404, detail="Source connection not found")
+        raise HTTPException(status_code=404, detail=NOT_FOUND_ERROR)
 
-    database_factory = DatabaseFactory()
-    database = database_factory.get_database(source_connection.type)
-    database.connect(**source_connection.model_dump())
+    source_connection_dict = source_connection.model_dump()
+    database_factory = DatabaseFactory(source_connection_dict)
+    database = database_factory.get_database()
 
-    return database.table_schema()
+    return database.get_table_schema()
 
 
-# Read source connection table rows
 @router.get("/{id}/rows")
 def read_source_connection_table_rows(
     id: int, session: SessionDep, limit: Annotated[int, Query(le=100)] = 10
@@ -167,17 +138,15 @@ def read_source_connection_table_rows(
     source_connection = session.get(SourceConnection, id)
 
     if not source_connection:
-        raise HTTPException(status_code=404, detail="Source connection not found")
+        raise HTTPException(status_code=404, detail=NOT_FOUND_ERROR)
 
-    database_factory = DatabaseFactory()
-    database = database_factory.get_database(source_connection.type)
-    database.connect(**source_connection.model_dump())
+    source_connection_dict = source_connection.model_dump()
+    database_factory = DatabaseFactory(source_connection_dict)
+    database = database_factory.get_database()
 
-    rows = database.table_rows()
-    return rows
+    return database.get_table_rows(limit)
 
 
-# Delete source connection
 @router.delete("/{id}")
 def delete_source_connection(id: int, session: SessionDep) -> dict:
     """Deletes source connection from database."""
@@ -185,8 +154,7 @@ def delete_source_connection(id: int, session: SessionDep) -> dict:
     source_connection = session.get(SourceConnection, id)
 
     if not source_connection:
-        error = SourceConnectionError.NOT_FOUND
-        raise HTTPException(status_code=404, detail=error)
+        raise HTTPException(status_code=404, detail=NOT_FOUND_ERROR)
 
     session.delete(source_connection)
     session.commit()

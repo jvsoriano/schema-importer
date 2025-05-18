@@ -1,0 +1,61 @@
+# Git-specific
+/.git/
+/.gitignore
+
+# Docker-specific
+/.dockerignore
+/Dockerfile*
+
+# Python-specific
+/*.pyc
+/*.pyo
+/__pycache__/
+/*.egg-info/
+/*.dist-info/
+/*.pyd
+/*.so
+
+# Dependency management
+/.venv/
+/env/
+/pip-wheel-metadata/
+/*.lock
+
+# OS-specific
+/.DS_Store
+/Thumbs.db
+
+# IDE-specific
+/.idea/
+/.vscode/
+
+# Logs
+/*.log
+
+# Development configuration
+/.env
+/venv/
+
+# Development testing
+/tests/
+
+# Database
+/app.db
+
+# Markdown files
+instructions.md
+README.md
+
+
+
+
+
+
+
+
+
+
+
+
+
+
